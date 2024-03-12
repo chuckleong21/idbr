@@ -65,191 +65,185 @@
 get_idb <- function(country,
                     year,
                     variables = NULL,
-                    concept = NULL,
+                    concept = deprecated(),
                     age = NULL,
                     sex = NULL,
                     geometry = FALSE,
                     resolution = c("low", "high"),
                     api_key = NULL) {
-
-  if (Sys.getenv('IDB_API') != '') {
-
-    api_key <- Sys.getenv('IDB_API')
-
-  } else if (is.null(api_key)) {
-
-    # Check if tidycensus API key is available
-
-    if (Sys.getenv("CENSUS_API_KEY") != '') {
-      api_key <- Sys.getenv("CENSUS_API_KEY")
-    } else {
-      stop('A Census API key is required.  Obtain one at https://api.census.gov/data/key_signup.html, and then supply the key to the `idb_api_key` function to use it throughout your idbr session.')
-    }
-
+  if(is_present(concept)) {
+    deprecate_stop("1.1.0", 'idbr::get_idb(concept = )', 'idbr::get_idb(variables = )')
   }
+
+  if(is.null(api_key) & !idb_api_key_available()) {
+    stop('A Census API key is required.  Obtain one at https://api.census.gov/data/key_signup.html,
+         and then supply the key to the `idb_api_key` function to use it throughout your idbr session.', call. = FALSE)
+  }
+
+  base_url <- "https://api.census.gov/data/timeseries/idb/"
+  api_level <- NULL; api_level_default <- "1year"
+  sex_value <- 0:2; names(sex_value) <- c("both", "male", "female")
+
 
   if (!is.null(age) || !is.null(sex)) {
-    base_url <- "https://api.census.gov/data/timeseries/idb/1year"
+    api_level <- api_level_default
   } else {
-    base_url <- "https://api.census.gov/data/timeseries/idb/5year"
+    api_level <- "5year"
   }
 
-  if (!is.null(concept)) {
-    variables <- idbr::variables5 %>%
-      dplyr::filter(Concept == concept) %>%
-      dplyr::pull(Name)
-  }
+  # country api param is now used by for=xxx
+  country <- map_chr(country, \(x) {
+    if(nchar(x) > 2) {
+      countrycode(x, "country.name", "iso2c")
+    } else x
+  })
 
-  if (!is.null(age) || !is.null(sex)) {
-    if (is.null(variables)) {
-      variables <- "POP"
-    } else {
-      stop("`variables` or `concept` cannot be used with age or sex subsets, which query the 1-year-of-age population API.  Specify a vector of variables and leave `AGE` and `SEX` as `NULL` to complete your request.", call. = FALSE)
-    }
-  }
+  country <- paste(country, collapse = ",")
+  country <- sprintf("genc+standard+countries+and+areas:%s", country)
 
-  country_vector <- NULL
-  # If more than one country is requested, pull all countries then filter down
-  if (length(country) > 1 || all(country == "all")) {
-    country_to_use <- NULL
-    if (all(country != "all")) {
-      country_vector <- countrycode::countrycode(country, 'country.name', 'iso2c')
-    }
+  vars_default <- toupper(c("name", "genc", "pop"))
+
+  if(is.null(variables)) {
+    variables <- vars_default
   } else {
-    if (nchar(country) > 2) {
-      country_to_use <- countrycode::countrycode(country, 'country.name', 'iso2c')
-    } else {
-      country_to_use <- country
-    }
+    api_conflict(variables)
+
+    variables <- map(vars_default, \(x) {
+      if(!x %in% variables) {
+        append(variables, x)
+      } else variables
+    }) %>%
+      reduce(c) %>%
+      unique()
   }
 
-  # Account for when age/sex are specified but the other is not
-  if (is.null(sex) && !is.null(age)) {
-    sex <- "both"
-  }
-
-  if (!is.null(sex) && is.null(age)) {
+  if(is.null(age)) {
     age <- 0:100
   }
 
-  if (!is.null(sex)) {
-
-    sex_ints <- purrr::map_chr(sex, ~{
-      if (.x == "both") return("0")
-      if (.x == "male") return("1")
-      if (.x == "female") return("2")
-    }) %>%
-      paste0(collapse = ",")
-
+  if(is.null(sex)) {
+    sex <- sex_value["both"]
   } else {
-    sex_ints <- NULL
+    sex <- sex_value[sex]
   }
 
-  # Format age and year, if appropriate
-  if (!is.null(age)) {
-    age <- paste0(age, collapse = ",")
-  }
-
-  year <- paste0(year, collapse = ",")
-
-  variables <- toupper(variables)
-
-  # Grab NAME by default if not already requested
-  if (!"NAME" %in% variables) {
-    variables <- c("NAME", variables)
-  }
-
-  if (length(variables) > 1) {
-    variables <- paste0(variables, collapse = ",")
-  }
-
-  if (is.null(country_to_use)) {
-    variables <- paste0("GEO_ID,", variables)
+  if(api_level == "5year") {
+    header <- c("NAME", "GENC", "POP", "YR", "AREAS")
+    q <- list(
+      "get" = paste(variables, sep = ","),
+      "YR" = paste(year, sep = ","),
+      "for" = I(country),
+      "key" = api_key
+    )
   } else {
-    country_to_use <- paste0("W140000WO", country_to_use)
-  }
-
-  # Formulate the query
-  api_request <- httr::GET(base_url,
-                           query = list(
-                             get = variables,
-                             SEX = sex_ints,
-                             YR = year,
-                             AGE = age,
-                             GEO_ID = country_to_use,
-                             key = api_key
-                           ))
-
-  req_content <- httr::content(api_request, as = "text")
-
-  if (api_request$status_code != "200") {
-    stop(sprintf("Your data request has errored.  The error message returned is %s",
-                 req_content))
-  }
-
-  req_frame <- data.frame(jsonlite::fromJSON(req_content), stringsAsFactors = FALSE)
-
-  colnames(req_frame) <- req_frame[1, ]
-
-  req_frame <- req_frame[-1, ]
-
-  rownames(req_frame) <- NULL
-
-  string_cols <- names(req_frame) %in% c("NAME", "GEO_ID")
-
-  req_frame[!string_cols] <- apply(req_frame[!string_cols], 2, function(x) as.numeric(x))
-
-  req_tibble <- dplyr::as_tibble(req_frame)
-
-  names(req_tibble) <- tolower(names(req_tibble))
-
-  req_tibble$geo_id <- stringr::str_sub(req_tibble$geo_id, start = -2)
-
-  out_tibble <- dplyr::select(req_tibble, code = geo_id, year = yr, dplyr::everything())
-
-  if ("sex" %in% names(out_tibble)) {
-    out_tibble$sex <- dplyr::recode(out_tibble$sex,
-      `0` = "Both",
-      `1` = "Male",
-      `2` = "Female"
+    header <- c("NAME", "GENC", "POP", "YR", "AGE", "SEX", "AREAS")
+    q <- list(
+      "get" = paste(variables, sep = ","),
+      "YR" = paste(year, sep = ","),
+      "AGE" = age,
+      "SEX" = sex,
+      "for" = I(country),
+      "key" = api_key
     )
   }
 
-  if (!is.null(country_vector)) {
-    out_tibble <- out_tibble %>%
-      dplyr::filter(code %in% country_vector)
+  req <- request(base_url) %>%
+    req_url_path_append(api_level) %>%
+    req_url_query(!!!q, .multi = "comma") %>%
+    req_perform()
+
+  resp_df <- resp_body_json(req, simplifyVector = TRUE) %>%
+    as.data.frame() %>%
+    slice(-1) %>%
+    set_names(header) %>%
+    as_tibble()
+
+  if(api_level == "1year") {
+    resp_df$SEX <- names(sex_value)[match(resp_df$SEX, sex_value)]
+    resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR, .data$AGE), as.numeric))
+  } else {
+    resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR), as.numeric))
   }
 
+  # if (api_request$status_code != "200") {
+  #   stop(sprintf("Your data request has errored.  The error message returned is %s",
+  #                req_content))
+  # }
+  #
+  # req_frame <- data.frame(jsonlite::fromJSON(req_content), stringsAsFactors = FALSE)
+  #
+  # colnames(req_frame) <- req_frame[1, ]
+  #
+  # req_frame <- req_frame[-1, ]
+  #
+  # rownames(req_frame) <- NULL
+  #
+  # string_cols <- names(req_frame) %in% c("NAME", "GEO_ID")
+  #
+  # req_frame[!string_cols] <- apply(req_frame[!string_cols], 2, function(x) as.numeric(x))
+  #
+  # req_tibble <- as_tibble(req_frame)
+  #
+  # names(req_tibble) <- tolower(names(req_tibble))
+  #
+  # req_tibble$geo_id <- stringr::str_sub(req_tibble$geo_id, start = -2)
+  #
+  # out_tibble <- select(req_tibble, code = geo_id, year = yr, everything())
+  #
+  # if ("sex" %in% names(out_tibble)) {
+  #   out_tibble$sex <- recode(out_tibble$sex,
+  #     `0` = "Both",
+  #     `1` = "Male",
+  #     `2` = "Female"
+  #   )
+  # }
+  #
+  # if (!is.null(country_vector)) {
+  #   out_tibble <- out_tibble %>%
+  #     filter(code %in% country_vector)
+  # }
+  #
   if (geometry) {
     resolution <- match.arg(resolution)
 
-    if (resolution == "low") {
-      geom <- rnaturalearthdata::countries110 %>%
-        sf::st_as_sf() %>%
-        dplyr::select(code = iso_a2)
-    } else {
-      geom <- rnaturalearthdata::countries50 %>%
-        sf::st_as_sf() %>%
-        dplyr::select(code = iso_a2)
-    }
+    sf_df <- map2(c("low", "high"), list(countries50, countries50), \(x, y) {
+      select(st_as_sf(y), code = iso_a2)
+    }) %>%
+        set_names(c("low", "high"))
 
-    # Should be left join if country is all, to make missing countries NULL
-    # Not perfect yet, e.g. for regional mapping with missing countries
-    if (all(country == "all")) {
-
-      joined_tbl <- geom %>%
-        dplyr::left_join(out_tibble, by = "code")
-
-    } else {
-
-      joined_tbl <- geom %>%
-        dplyr::inner_join(out_tibble, by = "code")
-
-    }
-
-    return(joined_tbl)
+    left_join(resp_df, sf_df[[resolution]], join_by(.data$AREAS == code))
   } else {
-    return(out_tibble)
+    resp_df
   }
+
+
+    # if (resolution == "low") {
+    #   geom <- countries110 %>%
+    #     st_as_sf() %>%
+    #     select(code = iso_a2)
+    # } else {
+    #   geom <- idbr::countries50 %>%
+    #     st_as_sf() %>%
+    #     select(code = iso_a2)
+    # }
+  #
+  #   # Should be left join if country is all, to make missing countries NULL
+  #   # Not perfect yet, e.g. for regional mapping with missing countries
+  #   if (all(country == "all")) {
+  #
+  #     joined_tbl <- geom %>%
+  #       left_join(out_tibble, by = "code")
+  #
+  #   } else {
+  #
+  #     joined_tbl <- geom %>%
+  #       inner_join(out_tibble, by = "code")
+  #
+  #   }
+  #
+  #   return(joined_tbl)
+  # } else {
+  #   return(out_tibble)
+  # }
 
 }
