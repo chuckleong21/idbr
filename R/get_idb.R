@@ -83,6 +83,7 @@ get_idb <- function(country,
   base_url <- "https://api.census.gov/data/timeseries/idb/"
   api_level <- NULL; api_level_default <- "1year"
   sex_value <- 0:2; names(sex_value) <- c("both", "male", "female")
+  api_key <- Sys.getenv("IDB_API") %||% api_key
 
 
   if (!is.null(age) || !is.null(sex)) {
@@ -101,7 +102,7 @@ get_idb <- function(country,
   country <- paste(country, collapse = ",")
   country <- sprintf("genc+standard+countries+and+areas:%s", country)
 
-  vars_default <- toupper(c("name", "genc", "pop"))
+  vars_default <- c("name", "genc", "pop")
 
   if(is.null(variables)) {
     variables <- vars_default
@@ -114,7 +115,8 @@ get_idb <- function(country,
       } else variables
     }) %>%
       reduce(c) %>%
-      unique()
+      unique() %>%
+      toupper()
   }
 
   if(is.null(age)) {
@@ -128,7 +130,6 @@ get_idb <- function(country,
   }
 
   if(api_level == "5year") {
-    header <- c("NAME", "GENC", "POP", "YR", "AREAS")
     q <- list(
       "get" = paste(variables, sep = ","),
       "YR" = paste(year, sep = ","),
@@ -136,7 +137,6 @@ get_idb <- function(country,
       "key" = api_key
     )
   } else {
-    header <- c("NAME", "GENC", "POP", "YR", "AGE", "SEX", "AREAS")
     q <- list(
       "get" = paste(variables, sep = ","),
       "YR" = paste(year, sep = ","),
@@ -152,18 +152,21 @@ get_idb <- function(country,
     req_url_query(!!!q, .multi = "comma") %>%
     req_perform()
 
+  header <- resp_body_json(req, simplifyVector = TRUE)[1, ]
+
   resp_df <- resp_body_json(req, simplifyVector = TRUE) %>%
     as.data.frame() %>%
     slice(-1) %>%
     set_names(header) %>%
-    as_tibble()
+    as_tibble() %>%
+    select(-`genc standard countries and areas`)
 
-  if(api_level == "1year") {
-    resp_df$SEX <- names(sex_value)[match(resp_df$SEX, sex_value)]
-    resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR, .data$AGE), as.numeric))
-  } else {
-    resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR), as.numeric))
-  }
+  # if(api_level == "1year") {
+  #   resp_df$SEX <- names(sex_value)[match(resp_df$SEX, sex_value)]
+  #   resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR, .data$AGE), as.numeric))
+  # } else {
+  #   resp_df <- mutate(resp_df, across(c(.data$POP, .data$YR), as.numeric))
+  # }
 
   # if (api_request$status_code != "200") {
   #   stop(sprintf("Your data request has errored.  The error message returned is %s",
@@ -203,15 +206,15 @@ get_idb <- function(country,
   #     filter(code %in% country_vector)
   # }
   #
+  sf_df <- map2(c("low", "high"), list(countries50, countries50), \(x, y) {
+    select(st_as_sf(y), code = iso_a2)
+  }) %>%
+    set_names(c("low", "high"))
+
   if (geometry) {
     resolution <- match.arg(resolution)
 
-    sf_df <- map2(c("low", "high"), list(countries50, countries50), \(x, y) {
-      select(st_as_sf(y), code = iso_a2)
-    }) %>%
-        set_names(c("low", "high"))
-
-    left_join(resp_df, sf_df[[resolution]], join_by(.data$AREAS == code))
+    left_join(resp_df, sf_df[[resolution]], join_by(GENC == code))
   } else {
     resp_df
   }
@@ -246,4 +249,22 @@ get_idb <- function(country,
   #   return(out_tibble)
   # }
 
+}
+
+
+#' Set the Census API key
+#'
+#' Use to set the Census API key in an idbr session so that the key does not have to be passed to each
+#' \code{idb1} or \code{idb5} function call.
+#'
+#' @param api_key The idbr user's Census API key.  Can be obtained from \url{https://api.census.gov/data/key_signup.html}.
+#'
+#' @examples \dontrun{
+#'
+#' idb_api_key('Your API key goes here')
+#'
+#' }
+#' @export
+idb_api_key <- function(api_key) {
+  Sys.setenv(IDB_API = api_key)
 }

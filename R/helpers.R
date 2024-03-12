@@ -29,7 +29,8 @@
 #   }
 # }
 
-idb_api_key_available <- \() {
+
+idb_api_key_available <- function() {
   api_key <- NULL
 
   in_env <- map_lgl(c('IDB_API' = 'IDB_API', 'CENSUS_API_KEY' = 'CENSUS_API_KEY'),
@@ -48,7 +49,7 @@ idb_api_key_available <- \() {
   } else FALSE
 }
 
-api_conflict <- \(vars) {
+api_conflict <- function(vars) {
   lvls <- variables %>%
     filter(.data$name %in% vars) %>%
     pull(.data$api_level) %>%
