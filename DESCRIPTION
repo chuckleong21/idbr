@@ -13,15 +13,16 @@ Encoding: UTF-8
 Depends:
   R (>= 3.0.0)
 Suggests:
-  tidyr,
-  plotly
+    plotly,
+    testthat (>= 3.0.0)
 Imports:
-  jsonlite,
-  dplyr,
-  httr,
-  countrycode, 
-  purrr,
-  rnaturalearthdata,
-  sf,
-  stringr
-RoxygenNote: 7.2.3
+    jsonlite,
+    dplyr,
+    countrycode,
+    purrr,
+    sf,
+    httr2,
+    lifecycle,
+    tidyr
+RoxygenNote: 7.3.1
+Config/testthat/edition: 3
