@@ -8,7 +8,7 @@ get_idb(
   country,
   year,
   variables = NULL,
-  concept = NULL,
+  concept = deprecated(),
   age = NULL,
   sex = NULL,
   geometry = FALSE,

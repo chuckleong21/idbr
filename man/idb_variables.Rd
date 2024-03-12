@@ -2,10 +2,16 @@
 % Please edit documentation in R/reference.R
 \name{idb_variables}
 \alias{idb_variables}
-\title{View the available variables for use in idbr}
+\title{Access IDB variables through api}
 \usage{
 idb_variables()
 }
+\value{
+A tibble of 134 rows and 4 columns
+}
 \description{
-The first column, "Name", details the variable names that can be passed the function.  The second column, "Label", describes the content of the variables.
+Access IDB variables through api
+}
+\examples{
+idb_variables()
 }
