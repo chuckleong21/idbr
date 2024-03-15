@@ -80,10 +80,22 @@ get_idb <- function(country,
          and then supply the key to the `idb_api_key` function to use it throughout your idbr session.', call. = FALSE)
   }
 
+  # country_error <- "One or more countries are not valid for API query, See `?all_countries` for valid countries"
+  #
+  # country_check <- map_lgl(countries, \(x) {
+  #   if(nchar(x) > 2) {
+  #     x %in% names(all_countries)
+  #   } else {
+  #     x %in% all_countries
+  #   }
+  # })
+
+  # if(!all(country_check)) stop(country_error, call. = FALSE)
+
   base_url <- "https://api.census.gov/data/timeseries/idb/"
   api_level <- NULL; api_level_default <- "1year"
   sex_value <- 0:2; names(sex_value) <- c("both", "male", "female")
-  api_key <- Sys.getenv("IDB_API") %||% api_key
+  api_key <- api_key %||% Sys.getenv("IDB_API")
 
 
   if (!is.null(age) || !is.null(sex)) {
@@ -93,11 +105,15 @@ get_idb <- function(country,
   }
 
   # country api param is now used by for=xxx
-  country <- map_chr(country, \(x) {
-    if(nchar(x) > 2) {
-      countrycode(x, "country.name", "iso2c")
-    } else x
-  })
+
+  if("all" %in% country) {
+    if(length(country) > 1) {
+      warning("`country` is not scalar when `country = all`. Coerced to `country = all`")
+    }
+    country <- all_countries
+  } else {
+    country <- map_chr(country, \(x) country_check(x))
+  }
 
   country <- paste(country, collapse = ",")
   country <- sprintf("genc+standard+countries+and+areas:%s", country)
@@ -115,30 +131,36 @@ get_idb <- function(country,
       } else variables
     }) %>%
       reduce(c) %>%
-      unique() %>%
-      toupper()
+      unique()
   }
 
   if(is.null(age)) {
     age <- 0:100
+  } else {
+    if(!any(age %in% 0:100)) {
+      stop("Invalid age. It ranges from 0 to 100", call. = FALSE)
+    }
   }
 
   if(is.null(sex)) {
     sex <- sex_value["both"]
   } else {
+    if(!any(sex %in% names(sex_value))) {
+      stop("Invalid sex. It is either 'both', 'male' or 'female'", call. = FALSE)
+    }
     sex <- sex_value[sex]
   }
 
   if(api_level == "5year") {
     q <- list(
-      "get" = paste(variables, sep = ","),
+      "get" = paste(toupper(variables), sep = ","),
       "YR" = paste(year, sep = ","),
       "for" = I(country),
       "key" = api_key
     )
   } else {
     q <- list(
-      "get" = paste(variables, sep = ","),
+      "get" = paste(toupper(variables), sep = ","),
       "YR" = paste(year, sep = ","),
       "AGE" = age,
       "SEX" = sex,
@@ -160,6 +182,22 @@ get_idb <- function(country,
     set_names(header) %>%
     as_tibble() %>%
     select(-`genc standard countries and areas`)
+
+  names(resp_df) <- tolower(names(resp_df))
+
+  resp_df <- imap(resp_df, \(x, i) {
+    if(i %in% c("name", "genc")) {
+      x
+    } else if(i == "sex") {
+      names(sex_value)[match(x, sex_value)]
+    } else {
+      if(type[match(i, names(type))] %in% c("int", "float")) {
+        as.numeric(x)
+      }
+    }
+  }) %>%
+    as_tibble()
+
 
   # if(api_level == "1year") {
   #   resp_df$SEX <- names(sex_value)[match(resp_df$SEX, sex_value)]
@@ -214,7 +252,7 @@ get_idb <- function(country,
   if (geometry) {
     resolution <- match.arg(resolution)
 
-    left_join(resp_df, sf_df[[resolution]], join_by(GENC == code))
+    left_join(resp_df, sf_df[[resolution]], join_by(genc == code))
   } else {
     resp_df
   }
