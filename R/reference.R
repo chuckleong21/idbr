@@ -15,7 +15,7 @@ idb_variables <- function() {
   query_params <- c("1year", "5year")
   variables_json <- sprintf("https://api.census.gov/data/timeseries/idb/%s/variables.json", query_params)
 
-  purrr::map2(query_params, variables_json, \(q, v) {
+  map2(query_params, variables_json, \(q, v) {
     r <- tryCatch(read_json(v))
     while(inherits(r, "try-error")) {
       r <- tryCatch(read_json(v))
@@ -25,10 +25,10 @@ idb_variables <- function() {
       as_tibble() %>%
       unnest_wider(col = variables) %>%
       mutate(name = map(r, names)[[1]],
-                    api_level = q) %>%
-      select(.data$name, .data$label, .data$concept, .data$api_level)
+                    api_level = q)
   }) %>%
-    list_rbind()
+    list_rbind() %>%
+    select(.data$name, .data$label, .data$concept, .data$api_level)
 }
 
 
