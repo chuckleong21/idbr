@@ -51,10 +51,22 @@ idb_api_key_available <- function() {
 
 api_conflict <- function(vars) {
   lvls <- variables %>%
-    filter(.data$name %in% vars) %>%
+    filter(tolower(.data$name) %in% vars) %>%
     pull(.data$api_level) %>%
     unique()
   if(length(lvls) > 1) {
-    stop('API variables conflict. Supply the variables under `api_levels, Run `idb_variables()` to see more.')
+    stop('API variables conflict. Supply the variables under `api_levels, See `?idb_variables()`')
+  }
+}
+
+country_check <- function(x, iso2c = TRUE) {
+  if(nchar(x) > 2) {
+    stopifnot("One or more countries are not valid for API query, See `?all_countries` for valid countries" = x %in% names(all_countries))
+    if(iso2c) {
+      countrycode(x, "country.name", "iso2c")
+    }
+  } else {
+    stopifnot("One or more countries are not valid for API query, See `?all_countries` for valid countries" = x %in% all_countries)
+    x
   }
 }
